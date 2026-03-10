@@ -1,7 +1,7 @@
 ---
-title: "CTA-ED Exercise 4: Scaling techniques (with correct answers)"
-author: "Marion Lieutaud"
-date: "6/03/2024"
+title: "CTA-ED Exercise 4: Scaling techniques"
+author: "Yinuo Liu"
+date: "10/03/2024"
 output: html_document
 ---
 
@@ -44,6 +44,10 @@ We first take a sample from these data to speed up the runtime of some of the an
 tweets <- tweets %>%
   sample_n(20000)
 ```
+因为原始 tweets 可能很多，直接跑模型会比较慢。
+所以这里随机抽 20,000 条，目的是：降低计算量，加快运行速度。
+这是随机抽样，所以每次结果可能会有一点差异。
+这也是后面为什么常常会加 set.seed()，为了让结果可复现。
 
 ## Construct `dfm` object
 
@@ -66,18 +70,14 @@ dfm_tweets <- dfm(tokens(tweets_corpus,
 We can then have a look at the number of documents (tweets) we have per newspaper Twitter account. 
 
 ```{r}
-
 ## number of tweets per newspaper
 table(docvars(dfm_tweets, "newspaper"))
-
 ```
 
 And this is what our document feature matrix looks like, where each word has a count for each of our eight newspapers. 
 
 ```{r}
-
 dfm_tweets
-
 ```
 
 ## Estimate wordfish model
@@ -98,21 +98,66 @@ dim(dfm_newstweets)
 #### estimate the Wordfish model ####
 set.seed(123L)
 dfm_newstweets_results <- textmodel_wordfish(dfm_newstweets, 
-                                             sparse = TRUE)
+                                            # sparse = TRUE
+                                            )
+
+
 
 ```
+表示：
+8 个 document（8 家报纸）
+11,111 个 features（筛选后的词）
+
+按报纸聚合
+这里非常重要。
+原来每一条 tweet 是一个 document。
+但现在不是想比较单条 tweet，而是想比较不同报纸整体的语言风格。
+所以这一步把同一家报纸的所有 tweets 合并起来。
+结果就变成：8 个 documents（每家报纸一个 document），每个 document 是这家报纸所有 tweets 的总词频。
+也就是从：tweet-level analysis变成newspaper-level analysis
+
+去掉太少见的词
+只保留至少出现在 2 家及以上报纸里的词。
+
+因为如果一个词只出现在 1 家报纸里，它可能：太偶然，太专有，太噪音,不能帮助比较报纸之间的相对位置。
+Wordfish 是为了找共同维度，不是为了找每家报纸独有的随机词。
+所以这个 trimming 是为了：降低噪音，提高可比性，让模型更稳定。
 
 And this is what results.
-
 ```{r}
 summary(dfm_newstweets_results)
 ```
+文本位置：theta,每个 document 在潜在维度上的位置
+词语位置：beta,每个词偏向潜在维度哪一边
+
+如果某些词经常一起出现在某几家报纸里，而另一些词经常一起出现在另外几家报纸里，
+那模型就会推断这些报纸在一条潜在维度上分布不同。
+所以 Wordfish 本质上是在找：什么样的词频差异最能系统地区分这些文本
+
+theta 是每家报纸在潜在维度上的位置。
+数值越大 = 越偏右侧
+数值越小 = 越偏左侧
+但这里的“左”和“右”不是政治意义上的左/右，
+只是这条维度的两个方向。
+
+se 是标准误（standard error），表示位置估计的不确定性。
+se 越小，估计越稳定。se 越大，不确定性越高
+这里因为每家报纸聚合了很多 tweet，标准误一般都比较小。
+
+从结果看：
+偏右侧的有：The Sun，Daily Mirror，Daily MailUK
+偏左侧的有：Telegraph，The Times，Guardian, MetroUK, Evening Standard
 
 We can then plot our estimates of the $\theta$s---i.e., the estimates of the latent newspaper position---as so.
 
 ```{r}
 textplot_scale1d(dfm_newstweets_results)
 ```
+这一步是把 8 家报纸画在一条线上。
+每个报纸是一个点
+点在横轴上的位置就是它的 theta
+越靠近，说明语言风格越相似；越远，说明差异越大。
+这个图的意义是直观看到聚类关系：tabloids 往一边靠，broadsheets 往另一边靠。
 
 Interestingly, we seem not to have captured ideology but some other tonal dimension. We see that the tabloid newspapers are scored similarly, and grouped toward the right hand side of this latent dimension; whereas the broadsheet newspapers have an estimated theta further to the left.
 
@@ -123,6 +168,11 @@ Plotting the "features," i.e., the word-level betas shows how words are position
 textplot_scale1d(dfm_newstweets_results, margin = "features")
 
 ```
+这个图画的不是报纸，而是词。
+beta 表示某个词更偏向潜在维度的哪一侧。
+beta 大：这个词更常见于右侧那些报纸
+beta 小/负：这个词更常见于左侧那些报纸
+所以词的 beta 帮解释这条维度到底在区分什么。
 
 And we can also look at these features.
 
@@ -170,22 +220,67 @@ kaneko_dfm_study1 <- dfm_trim(kaneko_dfm_study1, min_docfreq = 2, docfreq_type =
 dim(kaneko_dfm_study1)
 ```
 
-## Exercises
+# Exercises
 
 1. Estimate a wordfish model for with Kaneko (2021)'s data
 
 ```{r}
 ## estimate the Wordfish model
+set.seed(123)
+kaneko_wordfish <- textmodel_wordfish(kaneko_dfm_study1)
 
+# summary of results
+summary(kaneko_wordfish)
 ```
-Write a paragraph here explaining and interpreting your results 
+
+The Wordfish model places newspapers along a latent dimension based on their word usage. In the results, newspapers such as Chunichi and Asahi are located on the negative side of the scale, while Yomiuri, Nikkei, and Sankei appear on the positive side. This pattern suggests systematic differences in language across newspapers. Following Kaneko et al. (2021), the dimension can be interpreted as reflecting ideological differences between newspapers, with those on the negative side generally associated with more liberal positions and those on the positive side associated with more conservative positions. The small standard errors suggest that these estimates are relatively stable.
+
 
 2. Visualize the results
-```{r, fig.cap="Wordfish model estimates of Japanese newspapers' editorial texts}
-## We can then plot our estimates of the thetas---i.e., the estimates of the latent Japanese newspaper position.
+
+visualize document positions
+```{r, fig.cap="Wordfish model estimates of Japanese newspapers' editorial texts"}
+textplot_scale1d(kaneko_wordfish)
 ```
 
-Write here the interpretation of your plot(s)
+visualize feature positions
+```{r echo=TRUE, results='hide', error=FALSE, warning=FALSE, message=FALSE}
+library(showtext)
+library(sysfonts)
 
-Don't forget to knit!
+font_add("jp", "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc")
+showtext_auto()
+```
+
+```{r}
+textplot_scale1d(kaneko_wordfish, margin = "features")
+```
+
+The Wordfish plot shows how Japanese newspapers are positioned along a latent dimension based on word frequencies. Newspapers such as Yomiuri, Nikkei, and Sankei appear on the positive side of the scale, while Chunichi and Asahi are located on the negative side. This pattern suggests systematic differences in language use across newspapers. Following Kaneko et al. (2021), the dimension can be interpreted as reflecting ideological differences between newspapers, with those on the negative side generally associated with more liberal positions and those on the positive side associated with more conservative positions. The feature scores help interpret this dimension by showing which words are more strongly associated with each side of the scale.
+
+look at these features
+```{r}
+features <- kaneko_wordfish[["features"]]
+
+betas <- kaneko_wordfish[["beta"]]
+
+feat_betas <- as.data.frame(cbind(features, betas))
+feat_betas$betas <- as.numeric(feat_betas$betas)
+
+# top positive words
+feat_betas %>%
+  arrange(desc(betas)) %>%
+  top_n(20, betas) %>% 
+  kbl() %>%
+  kable_styling(bootstrap_options = "striped")
+```
+
+```{r}
+# top negative words
+feat_betas %>%
+  arrange(betas) %>%
+  top_n(-20, betas) %>% 
+  kbl() %>%
+  kable_styling(bootstrap_options = "striped")
+```
 
